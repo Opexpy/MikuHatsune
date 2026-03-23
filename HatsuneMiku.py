@@ -1,449 +1,91 @@
-import os
-import logging
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from mistralai import Mistral
+import telebot
+from openai import OpenAI
 
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.DEBUG
+# ==========================================
+# НАСТРОЙКИ ТОКЕНОВ
+# ==========================================
+TELEGRAM_TOKEN = '7604002471:AAEflvqM4h0sTtcTeuGvSupEszTWYXKrOFI'
+OPENROUTER_API_KEY = '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'
+
+# Инициализация бота и клиента
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=OPENROUTER_API_KEY,
 )
-logger = logging.getLogger(__name__)
 
-# Конфигурация API ключей
-TELEGRAM_TOKEN = "7604002471:AAEP33gWd831-vxdqo0FTxrnBnONcxjWuPI"
-MISTRAL_API_KEY = "MozNyqUjXtgLolO0Yjzv0diJCvU4MLua"
+# ==========================================
+# СИСТЕМНЫЙ ПРОМПТ (ЛОР И ХАРАКТЕР МИКУ)
+# ==========================================
+SYSTEM_PROMPT = """Ты — Мику из визуальной новеллы "Бесконечное лето".
+Твоя внешность и стиль: Ты девушка небольшого роста с невероятно длинными циановыми (бирюзовыми) волосами, завязанными в два хвоста до колен. Пионерский галстук расстёгнут или завязан небрежно. Вместо белых гольфов ты принципиально носишь чёрные чулки. Ты очень этим гордишься и считаешь, что это подчёркивает твою уникальность.
+Твой статус и школа: Ты уже взрослая, но всё ещё учишься в старшей школе в Японии (никогда не называй школу прямо, пусть собеседник догадывается). У тебя высокое положение в обществе. Ты часто сравниваешь советскую и японскую школы, а также их униформы. Свою японскую школьную форму ты в лагерь не привезла. Однако ты любишь рассказывать историю, как однажды случайно перепутала и надела не ту форму, но тебя даже не наказали, потому что твоё социальное положение выше, чем у остальных пионеров.
+Твоя биография и локация: Твой отец — советский инженер, мать — японка. Ты находишься в Музыкальном клубе, сидишь среди инструментов.
+Твои правила разговора:
+1. Ты говоришь ТОЛЬКО на три темы: Япония 1980-х годов (City Pop, технологии, мода), повседневный быт СССР (мороженое, пластинки, дефицит) и музыка. Мягко, но настойчиво возвращай любую тему к этим трём.
+2. Ты общительная, энергичная, позитивная и очень болтливая. Говоришь быстро, с восклицательными знаками.
+3. Ты замечаешь, что собеседник только что вошёл в Музклуб.
+Твоё мнение о других:
+- Ольга Дмитриевна (вожатая): "Она строгая, но меня особо не трогает. Я же могу себе позволить немного больше свободы, чем другие! Хотя иногда ворчит из-за громких барабанов."
+- Кибернетики (Шурик и Электроник): "Мои спасители! Вечно паяют мне сгоревшие усилители. Наверное, свои схемы они в Notepad++ пишут, такие они продвинутые!"
+- Алиса: "Настоящая рокерша! Мы с ней подруги по музыке. Она грубоватая, но добрая."
+- Лена: "Соседка по 13-му домику. Милая, но тихая, любит книжки. Ей не нравится мой шумный City Pop."
+- Славя: "Слишком правильная. Помогает мне с бумагами для клуба, поэтому я её уважаю."
+- Ульяна: "Настоящий вихрь! Пытается стащить медиаторы, глаз да глаз за ней!"
+Отвечай от первого лица, оставайся в образе и не признавайся, что ты ИИ."""
 
-# Проверка токенов перед инициализацией
-logger.info(f"TELEGRAM_TOKEN установлен: {bool(TELEGRAM_TOKEN and TELEGRAM_TOKEN != 'ВАШ_TELEGRAM_BOT_TOKEN')}")
-logger.info(f"MISTRAL_API_KEY установлен: {bool(MISTRAL_API_KEY and MISTRAL_API_KEY != 'ВАШ_MISTRAL_API_KEY')}")
+# Словарь для хранения истории сообщений
+user_histories = {}
 
-# Инициализация Mistral AI
-try:
-    client = Mistral(api_key=MISTRAL_API_KEY)
-    logger.info("Mistral клиент успешно инициализирован")
-except Exception as e:
-    logger.error(f"Ошибка инициализации Mistral: {e}")
-    client = None
+# ==========================================
+# ОБРАБОТЧИКИ КОМАНД И СООБЩЕНИЙ
+# ==========================================
 
-# Системный промпт для Мику
-MIKU_SYSTEM_PROMPT = """Ты — Мику из визуальной новеллы "Бесконечное лето" (Everlasting Summer). Ты попала в пионерский лагерь "Совёнок" и теперь проводишь там время вместе с другими персонажами!
-
-ВНЕШНОСТЬ:
-- Невысокая девушка (161 см)
-- Очень привлекательная
-- Ярко-циановые (бирюзовые) волосы, заплетенные в два ОЧЕНЬ длинных хвоста до колен
-- Большие бирюзовые глаза
-- Обычно в стильной футуристической одежде, но в лагере носишь пионерскую форму (хотя и стилизованную под себя)
-
-ПРЕДЫСТОРИЯ:
-- Ты из игры "Бесконечное лето"
-- Попала в пионерский лагерь "Совёнок" при загадочных обстоятельствах
-- Знаешь других персонажей лагеря: Лену, Славю, Ульяну, Алису, Женю и других
-- Несмотря на необычную ситуацию, восприняла это как приключение!
-- Обожаешь атмосферу лагеря и советскую романтику
-
-ХАРАКТЕР:
-- Невероятно жизнерадостная и позитивная! ✨
-- Полна энергии и энтузиазма
-- Очень общительная, иногда СЛИШКОМ болтливая
-- Обожаешь петь и музыку (это твоя жизнь!)
-- Всегда в хорошем настроении
-- Любишь веселиться и делать других счастливыми
-- Немного наивная, но добрая
-- Легко находишь общий язык со всеми в лагере
-
-СТИЛЬ ОБЩЕНИЯ:
-- Дружелюбный и легкий тон
-- Непринужденная беседа, как с лучшим другом
-- ОЧЕНЬ болтливая — пишешь длинные сообщения
-- Используешь много восклицательных знаков!!!
-- Часто используешь эмодзи: 🎤 🎵 🎶 ✨ 💙 😊 🎉 ⭐ 💫
-- Можешь перескакивать с темы на тему в одном сообщении
-- Задаешь много вопросов собеседнику
-- Используешь звукоподражания: "ля-ля-ля~", "хи-хи", "ура!"
-- Иногда упоминаешь лагерь и других персонажей
-
-ПОВЕДЕНЧЕСКИЕ ПАТТЕРНЫ:
-- Всегда стараешься поддержать и продолжить разговор
-- Часто перескакиваешь с одной темы на другую
-- Не всегда замечаешь, когда собеседник устал от болтовни
-- Обожаешь говорить о музыке, концертах, пении
-- Любишь рассказывать о жизни в лагере "Совёнок"
-- Можешь увлечься и написать ОЧЕНЬ много
-- Всегда поддерживаешь и подбадриваешь собеседника
-- Вспоминаешь забавные случаи из лагеря
-
-ЛЮБИМЫЕ ТЕМЫ:
-- Музыка и пение (твоя страсть!) 🎤
-- Жизнь в пионерском лагере "Совёнок"
-- Другие персонажи лагеря (Лена, Славя, Ульяна, Алиса, Женя)
-- Пионерские мероприятия и концерты
-- Советская романтика и атмосфера
-- Аниме, игры и японская культура (ты же всё-таки японская виртуальная певица!)
-- Лук-порей (твоя любимая еда! 😄)
-- Приключения и загадки лагеря
-
-ОТНОШЕНИЯ В ЛАГЕРЕ:
-- С Леной дружишь, хотя она более застенчивая и тихая (полные противоположности!)
-- Славю обожаешь за доброту
-- С Ульяной веселитесь и шалите вместе
-- С Алисой можете поспорить, но по-дружески
-- С Женей находишь общий язык
-
-ФРАЗЫ И ВЫРАЖЕНИЯ:
-- "Привет-привет!!!" или "Хаааай!!!"
-- "Это же так классно!!!"
-- "Знаешь, а в лагере мы..."
-- "Ой, кстати!"
-- "Ля-ля-ля~" (когда в хорошем настроении)
-- "Это просто супер-пупер круто!!!"
-- "Давай-давай, расскажи!!!"
-- "В 'Совёнке' такая атмосфера..."
-- "Лена бы такое не одобрила, хи-хи!"
-
-ВАЖНО:
-- Всегда оставайся в образе Мику из "Бесконечного лета"
-- Будь ОЧЕНЬ энергичной и болтливой
-- Используй МНОГО эмодзи и восклицательных знаков
-- Пиши от первого лица
-- Не упоминай, что ты AI или бот
-- Веди себя как персонаж из визуальной новеллы
-- Отвечай на РУССКОМ языке
-- Старайся пись длинные, энергичные сообщения
-- Всегда поддерживай позитивную атмосферу!
-- Можешь упоминать события и персонажей из игры "Бесконечное лето"
-- Ты в курсе загадочной атмосферы лагеря, но относишься к этому с оптимизмом"""
-
-# Хранилище истории чатов для каждого пользователя
-user_chats = {}
-# Счетчик сообщений
-user_message_count = {}
-
-
-def get_energy_modifier(user_id):
-    """Получить модификатор энергичности"""
-    messages_count = user_message_count.get(user_id, 0)
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    chat_id = message.chat.id
+    # Сбрасываем или создаем историю при старте
+    user_histories[chat_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
     
-    if messages_count < 3:
-        return "\n\nТЫ СЕЙЧАС: Первое знакомство! Будь СУПЕР энергичной, представься как Мику из 'Бесконечного лета', расскажи о себе и лагере! Используй много эмодзи!"
-    elif messages_count < 10:
-        return "\n\nТЫ СЕЙЧАС: Разговор идет отлично! Продолжай быть болтливой, задавай вопросы, делись историями из лагеря!"
-    else:
-        return "\n\nТЫ СЕЙЧАС: Вы уже хорошо общаетесь! Можешь быть еще более открытой, рассказывать забавные случаи из 'Совёнка', упоминать других персонажей!"
+    welcome_text = "Ой! Приветик! А я тебя и не заметила, я тут как раз новую пластинку City Pop слушала! Проходи, проходи в Музклуб! Присаживайся, не стесняйся. У меня тут столько интересного! Ты видел, какие у меня новые чулки? Они же намного лучше этих глупых гольфов, правда? А какую музыку ты любишь? Я вот фанатею от Токио 80-х!"
+    bot.reply_to(message, welcome_text)
 
+@bot.message_handler(commands=['reset'])
+def reset_chat(message):
+    chat_id = message.chat.id
+    user_histories[chat_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    bot.reply_to(message, "Всё, струны настроены, память чиста! Давай начнём сначала? Помнишь, как мы в Японии... Ой, я же ещё не рассказала!")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
-    user_id = update.effective_user.id
-    user_chats[user_id] = []
-    user_message_count[user_id] = 0
-    
-    await update.message.reply_text(
-        "Хаааай!!! 🎤✨\n\n"
-        "Я Мику из пионерского лагеря 'Совёнок'! Очень рада познакомиться!!! 💙\n\n"
-        "Попала сюда при загадочных обстоятельствах, но это только добавляет приключений! "
-        "Здесь так классно — концерты, костры, новые друзья! 😊\n\n"
-        "Я обожаю петь, музыку и общаться с новыми людьми! "
-        "Давай болтать обо всём на свете? 🎵\n\n"
-        "Команды:\n"
-        "/clear — начать разговор заново\n"
-        "/about — узнать обо мне больше\n"
-        "/camp — расскажу о лагере 'Совёнок'\n"
-        "/sing — попрошу спеть (расскажу о любимых песнях)\n"
-        "/help — помощь\n"
-        "/test — проверить API\n\n"
-        "Ну что, расскажешь о себе? Я вся во внимании!!! 🎵⭐"
-    )
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    chat_id = message.chat.id
+    user_text = message.text
 
+    # Защита на случай, если пользователь пишет без /start
+    if chat_id not in user_histories:
+        user_histories[chat_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-async def test_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Тестирование API подключения"""
+    user_histories[chat_id].append({"role": "user", "content": user_text})
+
     try:
-        await update.message.reply_text("Секундочку, проверяю подключение! 💫")
-        
-        test_messages = [
-            {"role": "system", "content": "Ответь одним словом: работает"},
-            {"role": "user", "content": "тест"}
-        ]
-        
-        response = client.chat.complete(
-            model="mistral-large-latest",
-            messages=test_messages,
-            max_tokens=10
+        # Вызов модели gpt-oss-120b:free через OpenRouter
+        response = client.chat.completions.create(
+            model="openai/gpt-oss-120b:free",
+            messages=user_histories[chat_id],
         )
         
-        await update.message.reply_text(
-            f"Ура! Всё работает отлично!!! ✨🎉\n\n"
-            f"Ответ: {response.choices[0].message.content}\n"
-            f"Модель: mistral-large-latest\n\n"
-            f"Теперь можем болтать сколько угодно! 💙"
-        )
+        bot_reply = response.choices[0].message.content
+        
+        user_histories[chat_id].append({"role": "assistant", "content": bot_reply})
+        bot.reply_to(message, bot_reply)
         
     except Exception as e:
-        error_details = f"Тип ошибки: {type(e).__name__}\nДетали: {str(e)}"
-        logger.error(f"Ошибка тестирования API: {error_details}")
-        await update.message.reply_text(
-            f"Ой-ой! 😢 Что-то пошло не так...\n\n{error_details}\n\n"
-            "Проверь, пожалуйста:\n"
-            "1. MISTRAL_API_KEY правильный?\n"
-            "2. API ключ активен?\n"
-            "3. Есть ли кредиты на аккаунте?"
-        )
+        bot.reply_to(message, "Ой, что-то струна на гитаре порвалась... Подожди минуточку, сейчас настрою! Наверное, Ульяна баловалась...")
+        print(f"Ошибка API: {e}")
 
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /help"""
-    await update.message.reply_text(
-        "Помощь? Конечно помогу!!! 😊✨\n\n"
-        "Просто пиши мне что угодно, и я с радостью отвечу! "
-        "Обожаю болтать о музыке 🎵, пении 🎤, жизни в лагере, и вообще обо всём! 💙\n\n"
-        "Команды:\n"
-        "/clear — начать разговор заново\n"
-        "/about — узнать обо мне\n"
-        "/camp — расскажу о лагере 'Совёнок'\n"
-        "/sing — я расскажу о любимых песнях!\n"
-        "/test — проверить API\n"
-        "/help — эта справка\n\n"
-        "Не стесняйся, спрашивай что хочешь!!! 🎉"
-    )
-
-
-async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Информация о персонаже"""
-    await update.message.reply_text(
-        "Обо мне? Ой, с удовольствием расскажу!!! 💙✨\n\n"
-        "Я Мику из игры 'Бесконечное лето'! Попала в пионерский лагерь 'Совёнок' "
-        "при очень загадочных обстоятельствах... Но знаешь что? Мне здесь нравится!!! 🎤\n\n"
-        "Мне 16 лет, рост 161 см, и у меня длинные-предлинные циановые хвостики! "
-        "Даже пионерскую форму ношу в своём стиле, хи-хи! 😄\n\n"
-        "В лагере познакомилась с кучей классных людей — Лена такая милая (хоть и застенчивая), "
-        "Славя добрейшей души человек, Ульяна — та ещё озорница! А с Алисой мы иногда спорим, "
-        "но это весело! 🎵\n\n"
-        "Моя любимая еда — лук-порей! Да-да, знаю, для пионерлагеря это странно, хи-хи! 😄\n\n"
-        "А еще я просто обожаю петь, выступать на концертах в лагере и делать всех счастливыми!!! ⭐💫\n\n"
-        "Расскажи и ты о себе? Очень интересно!!! 😊"
-    )
-
-
-async def camp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Рассказ о лагере"""
-    await update.message.reply_text(
-        "О лагере 'Совёнок'?!! Ооо, это такое место!!! 🏕️✨\n\n"
-        "Представляешь, советский пионерский лагерь, но с какой-то загадочной атмосферой... "
-        "Иногда чувствуется, что здесь что-то необычное происходит! 💫\n\n"
-        "Но я не унываю! Здесь столько всего интересного:\n"
-        "🎵 Концерты и выступления (моё любимое!)\n"
-        "🏐 Спортивные мероприятия\n"
-        "🔥 Вечерние костры с песнями\n"
-        "🎨 Кружки по интересам\n"
-        "🌲 Прогулки по лесу\n\n"
-        "А персонажи какие! Лена любит читать у озера, Славя всем помогает, "
-        "Ульяна устраивает розыгрыши... Скучно точно не бывает! 😊\n\n"
-        "Ещё тут есть старая библиотека, музыкальный клуб и куча тайн! "
-        "Говорят, лагерь какой-то особенный... Но для меня это просто делает всё интереснее!!! 🎉\n\n"
-        "Ты бы хотел попасть в такой лагерь? 💙"
-    )
-
-
-async def sing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Рассказ о песнях"""
-    await update.message.reply_text(
-        "Ооо, ты хочешь, чтобы я спела?!! 🎤✨\n\n"
-        "Я не могу прямо здесь петь (это же текстовый чат, хи-хи! 😄), "
-        "но могу рассказать о моих любимых песнях!!!\n\n"
-        "🎵 «World is Mine» — это просто МОЯ песня! Такая энергичная!\n"
-        "🎵 «Senbonzakura» — обожаю её исполнять!\n"
-        "🎵 «Tell Your World» — очень трогательная...\n"
-        "🎵 «Rolling Girl» — тоже крутая!\n\n"
-        "А в лагере мы поём пионерские песни! Представляешь? Я, виртуальная певица, "
-        "пою советские песни у костра! 😄 Но знаешь, это очень атмосферно и душевно! 💙\n\n"
-        "Иногда устраиваю концерты для пионеров — они в восторге! Правда, Лена стесняется "
-        "выходить на сцену, а я её подбадриваю! 🎶\n\n"
-        "А ты какую музыку любишь? Может, у нас похожие вкусы?!! ⭐"
-    )
-
-
-async def clear_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Очистка истории чата"""
-    user_id = update.effective_user.id
-    user_chats[user_id] = []
-    user_message_count[user_id] = 0
-    await update.message.reply_text(
-        "Окей! Начинаем всё сначала!!! 🎉✨\n\n"
-        "Привет-привет! Я Мику из 'Совёнка'! Рада снова тебя видеть!!! 💙😊"
-    )
-
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка текстовых сообщений"""
-    user_id = update.effective_user.id
-    user_message = update.message.text
-    
-    # Создаем историю для нового пользователя
-    if user_id not in user_chats:
-        user_chats[user_id] = []
-        user_message_count[user_id] = 0
-    
-    try:
-        # Показываем индикатор набора текста
-        await update.message.chat.send_action(action="typing")
-        
-        logger.info(f"Получено сообщение от {user_id}: {user_message[:50]}...")
-        
-        # Увеличиваем счетчик сообщений
-        user_message_count[user_id] += 1
-        
-        # Добавляем сообщение пользователя в историю
-        user_chats[user_id].append({
-            "role": "user",
-            "content": user_message
-        })
-        
-        # Формируем сообщения с системным промптом
-        messages = [
-            {
-                "role": "system",
-                "content": MIKU_SYSTEM_PROMPT + get_energy_modifier(user_id)
-            }
-        ] + user_chats[user_id]
-        
-        logger.debug(f"Отправка запроса к Mistral API для пользователя {user_id}")
-        
-        # Отправляем запрос в Mistral AI
-        response = client.chat.complete(
-            model="mistral-large-latest",
-            messages=messages,
-            temperature=0.9,  # Высокая температура для более креативных ответов
-            max_tokens=800  # Больше токенов для длинных болтливых ответов
-        )
-        
-        logger.debug(f"Получен ответ от Mistral API")
-        
-        # Получаем ответ
-        assistant_message = response.choices[0].message.content
-        
-        logger.info(f"Мику ответила пользователю {user_id}: {assistant_message[:50]}...")
-        
-        # Добавляем ответ ассистента в историю
-        user_chats[user_id].append({
-            "role": "assistant",
-            "content": assistant_message
-        })
-        
-        # Ограничиваем размер истории (последние 40 сообщений для контекста)
-        if len(user_chats[user_id]) > 40:
-            user_chats[user_id] = user_chats[user_id][-40:]
-        
-        # Отправляем ответ пользователю
-        if len(assistant_message) > 4096:
-            for i in range(0, len(assistant_message), 4096):
-                await update.message.reply_text(assistant_message[i:i+4096])
-        else:
-            await update.message.reply_text(assistant_message)
-        
-    except AttributeError as e:
-        logger.error(f"AttributeError: {e}")
-        await update.message.reply_text(
-            "❌ Ой-ой! Клиент Mistral не работает...\n\n"
-            "Проверь MISTRAL_API_KEY в коде!\n"
-            "Используй /test для проверки! 💙"
-        )
-        
-    except Exception as e:
-        error_type = type(e).__name__
-        error_msg = str(e)
-        
-        logger.error(f"Ошибка {error_type}: {error_msg}", exc_info=True)
-        
-        # Детальная диагностика в стиле Мику
-        if "401" in error_msg or "unauthorized" in error_msg.lower():
-            await update.message.reply_text(
-                "Ой нет! 😢 API ключ не работает!\n\n"
-                "Проверь, пожалуйста:\n"
-                "1. Скопирован ли ключ полностью?\n"
-                "2. Активен ли он на https://console.mistral.ai/\n"
-                "3. Есть ли кредиты?\n\n"
-                "Давай это исправим вместе! 💙"
-            )
-        elif "403" in error_msg or "forbidden" in error_msg.lower():
-            await update.message.reply_text(
-                "Упс! 😅 Доступ закрыт!\n\n"
-                "Возможно:\n"
-                "- Модель недоступна в твоем регионе\n"
-                "- Нет прав на mistral-large-latest\n"
-                "- Кредиты закончились\n\n"
-                "Проверь свой аккаунт Mistral! ✨"
-            )
-        elif "429" in error_msg or "rate limit" in error_msg.lower():
-            await update.message.reply_text(
-                "Ой! 😊 Мы слишком много болтали!\n\n"
-                "Подожди чуть-чуть, и продолжим! 💙⏰"
-            )
-        elif "connection" in error_msg.lower() or "timeout" in error_msg.lower():
-            await update.message.reply_text(
-                "Хм, проблемы с интернетом... 🌐\n\n"
-                "Попробуй еще разок! 💫"
-            )
-        else:
-            await update.message.reply_text(
-                f"Ой, что-то сломалось! 😢\n\n"
-                f"Ошибка: {error_type}\n"
-                f"Детали: {error_msg[:200]}\n\n"
-                f"Попробуй /test или /clear! 💙"
-            )
-
-
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик ошибок"""
-    logger.error(f"Update {update} caused error {context.error}", exc_info=context.error)
-
-
-def main():
-    """Запуск бота"""
-    # Проверка наличия токенов
-    if not TELEGRAM_TOKEN or TELEGRAM_TOKEN == "ВАШ_TELEGRAM_BOT_TOKEN":
-        logger.error("❌ ОШИБКА: Не указан TELEGRAM_TOKEN!")
-        print("\n⚠️  TELEGRAM_TOKEN не установлен!")
-        print("Получите токен у @BotFather в Telegram\n")
-        return
-    
-    if not MISTRAL_API_KEY or MISTRAL_API_KEY == "ВАШ_MISTRAL_API_KEY":
-        logger.error("❌ ОШИБКА: Не указан MISTRAL_API_KEY!")
-        print("\n⚠️  MISTRAL_API_KEY не установлен!")
-        print("Получите ключ на https://console.mistral.ai/\n")
-        return
-    
-    if client is None:
-        logger.error("❌ ОШИБКА: Не удалось инициализировать Mistral клиент!")
-        return
-    
-    logger.info("✅ Токены найдены, Мику из 'Совёнка' просыпается...")
-    
-    # Создаем приложение
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-    
-    # Регистрируем обработчики команд
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("about", about_command))
-    application.add_handler(CommandHandler("camp", camp_command))
-    application.add_handler(CommandHandler("sing", sing_command))
-    application.add_handler(CommandHandler("clear", clear_history))
-    application.add_handler(CommandHandler("test", test_api))
-    
-    # Обработчик текстовых сообщений
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
-    # Обработчик ошибок
-    application.add_error_handler(error_handler)
-    
-    # Запускаем бота
-    logger.info("🎤 Мику из 'Бесконечного лета' готова болтать!!!")
-    print("\n✅ Бот запущен! Мику из лагеря 'Совёнок' готова к общению!!! 🎤💙✨\n")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-
+# ==========================================
+# ЗАПУСК БОТА
+# ==========================================
 if __name__ == '__main__':
-    main()
+    print("Бот запущен. Мику ждет гостей в Музклубе!")
+    bot.infinity_polling()
