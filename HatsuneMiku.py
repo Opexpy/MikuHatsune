@@ -7,12 +7,6 @@ from openai import OpenAI
 TELEGRAM_TOKEN = '7604002471:AAFuhW043P8sEydz-rf2zz39pvLkETIH2KI'
 OPENROUTER_API_KEY = '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'
 
-# ==========================================
-# НАСТРОЙКИ ТОКЕНОВ
-# ==========================================
-TELEGRAM_TOKEN = 'ТВОЙ_ТОКЕН_ТЕЛЕГРАМА'
-OPENROUTER_API_KEY = 'ТВОЙ_ТОКЕН_OPENROUTER'
-
 # Инициализация бота и клиента
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 client = OpenAI(
