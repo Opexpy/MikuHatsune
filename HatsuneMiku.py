@@ -6,7 +6,6 @@ from openai import OpenAI
 # ==========================================
 TELEGRAM_TOKEN = '7604002471:AAEflvqM4h0sTtcTeuGvSupEszTWYXKrOFI'
 OPENROUTER_API_KEY = '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'
-
 # Инициализация бота и клиента
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 client = OpenAI(
@@ -68,9 +67,9 @@ def handle_message(message):
     user_histories[chat_id].append({"role": "user", "content": user_text})
 
     try:
-        # Вызов модели gpt-oss-120b:free через OpenRouter
+        # Вызов модели x-ai/grok-4.1-fast через OpenRouter
         response = client.chat.completions.create(
-            model="openai/gpt-oss-120b:free",
+            model="x-ai/grok-4.1-fast",
             messages=user_histories[chat_id],
         )
         
